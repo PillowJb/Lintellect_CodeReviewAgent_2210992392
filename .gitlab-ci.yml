@@ -1,0 +1,33 @@
+review:
+  image: node:18
+  script:
+    - npm install axios
+    - echo "Token present: ${GITLAB_TOKEN:+YES}"
+    - git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+    - git diff origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME > changes.diff
+    - |
+      node -e '
+      const fs = require("fs");
+      const axios = require("axios");
+      (async () => {
+        const code = fs.readFileSync("changes.diff", "utf-8");
+        if (!code.trim()) {
+          console.error("Empty diff");
+          process.exit(1);
+        }
+        try {
+          const res = await axios.post("https://code-reviewer-68a2.onrender.com/review", { code });
+          fs.writeFileSync("review.txt", res.data.report);
+        } catch (e) {
+          console.error(e.message);
+          process.exit(1);
+        }
+      })();'
+    - |
+      node -e '
+      const fs = require("fs");
+      const review = fs.readFileSync("review.txt", "utf-8");
+      fs.writeFileSync("payload.json", JSON.stringify({ body: review }));'
+    - curl --fail --request POST --header "PRIVATE-TOKEN: $GITLAB_TOKEN" --header "Content-Type: application/json" --data @payload.json "https://gitlab.com/api/v4/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes"
+  only:
+    - merge_requests
